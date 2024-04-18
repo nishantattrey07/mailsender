@@ -14,7 +14,8 @@ const port = process.env.PORT || 3000;
 
 const userSchema = new mongoose.Schema({
     name: { type: String, required: true },
-    email: { type: String, unique: true, required: true }
+    email: { type: String, unique: true, required: true },
+    isDeployEmailSent: { type: Boolean, default: false }
 });
 
 const User = mongoose.model('User', userSchema);
@@ -45,6 +46,10 @@ app.post('/local/mailer', async (req, res) => {
         return res.status(422).send({ error: 'Invalid input' });
     }
     else {
+        const user = new User({ name, email });
+        user.save()
+            .then(() => console.log('User saved to database'))
+            .catch(err => console.log('Error saving user to database: ', err));
         let transporter = nodemailer.createTransport({
             service: 'gmail',
             auth: {
@@ -65,17 +70,55 @@ app.post('/local/mailer', async (req, res) => {
                 console.log(error);
             } else {
                 console.log('Email sent: ' + info.response);
-
-                const user = new User({ name, email });
-                user.save()
-                    .then(() => console.log('User saved to database'))
-                    .catch(err => console.log('Error saving user to database: ', err));
                 return res.json({ message: 'Email has been sent!' });
             }
         });
     }
 });
 
-app.post('/deploy/mailer', (req, res) => {
-    let data = req.body;
+app.post('/deploy/mailer', async (req, res) => {
+    let { name, email } = req.body;
+    if (!validateEmail({ name, email })) {
+        return res.status(422).send({ error: 'Invalid input' });
+    }
+    else {
+        let transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.email,
+                pass: process.env.emailPass
+            }
+        });
+
+        let mailOptions = {
+            from: process.env.email,
+            to: `${email}`,
+            subject: 'Deploy Test Mail',
+            text: `Hello ${name}, this is a test email!`
+        };
+
+        transporter.sendMail(mailOptions, async function (error, info) {
+            if (error) {
+                console.log(error);
+            } else {
+                console.log('Email sent: ' + info.response);
+
+                const user = await User.findOne({ email: email });
+                if (user) {
+                    user.isDeployEmailSent = true;
+                    user.save()
+                        .then(() => console.log('User updated in database'))
+                        .catch(err => console.log('Error updating user in database: ', err));
+                }
+                else {
+                    const newUser = new User({ name, email, isDeployEmailSent: true });
+                    newUser.save()
+                        .then(() => console.log('User saved to database'))
+                        .catch(err => console.log('Error saving user to database: ', err));
+                }
+
+                return res.status(200).json({ message: 'Email has been sent!' });
+            }
+        });
+    }
 });
